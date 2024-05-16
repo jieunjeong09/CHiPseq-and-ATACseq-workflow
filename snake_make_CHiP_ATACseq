@@ -1,0 +1,63 @@
+# Snakefile for common CHiP/ATACseq processing, one can find and add
+# ATACseq specific analytic steps can be added, most of them are based on MACS2 output
+# The assumption is that it will run in Linux environment with 8 processors
+# and we have paired ends which are valuable in ATACseq
+# 
+
+import os
+Genome = /usr/Genomes/Human/GRCh38
+genome_name = os.path.basename(Genome.rstrip("/"))
+rule index_genome
+	input:
+		genome = Genome + genome_name + ".fa"
+	output:
+		genome = Genome + genome_name + ".index"
+		Genome + "GRCh38.index
+	shell:
+		"""
+		touch {output} && bwa index {input.genome}
+		"""
+
+rule align_reads:
+	input:
+		fastaq1 = "{sample}_R1.fastq"
+		fastaq2 = "{sample}_R2.fastq"
+		genome = Genome + genome_name + ".fa"
+		index = Genome + genome_name + ".index"
+	output:
+		"{sample}.bam"
+	shell:
+		"""
+		bwa mem {input.genome} {input.fastaq1} {input.fastaq2} | \
+		samtools view -bS | samtools sort > {output}
+		"""
+
+rule align_metrics:
+	input:
+		"{sample}.bam"
+	output:
+		"{sample}.metrics"
+	params:
+		tempd = os.path.expanduser("~") + "tmp"
+	shell:
+		"""
+		java -Xmx8G -jar picard.jar -Djava.io.tmpdir={params.tempd}  \
+			CollectAlignmentSummaryMetrics \
+		I={input} \
+		O={output} \
+		MAX_RECORDS_IN_RAM=5000000 \
+		VALIDATION_STRINGENCY=LENIENT \
+		ASSUME_SORTED=true \
+		SORT_ORDER=coordinate \
+		USE_THREADING=true \
+		NUM_THREADS=8
+
+rule macs2_peaks:
+	input:
+		"{sample}.bam"
+	output:
+		"{sample}.peaks/"
+	shell:
+		"""
+		macs2 callpeak -t {input} -f BAMPE -g hs --keep-dup all --call-summits -n {output}
+		"""
